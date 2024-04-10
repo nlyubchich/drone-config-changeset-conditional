@@ -1,6 +1,6 @@
 const express = require('express')
 const bodyParser = require('body-parser')
-const { Octokit } = require('@octokit/rest')
+const GhApi = require('github4')
 const yaml = require('yaml')
 const glob = require('globule')
 const createFilesChangedDeterminer = require('./lib/files-changed-determiner')
@@ -10,9 +10,8 @@ const isValidSig = require('./lib/signature-validator')
 const githubToken = process.env.GITHUB_TOKEN
 const sharedKey = process.env.PLUGIN_SECRET
 
-const gh = new Octokit({
-  auth: githubToken
-})
+const gh = new GhApi({ version: '3.0.0' })
+gh.authenticate({ type: 'token', token: githubToken })
 
 const determineFilesChanged = createFilesChangedDeterminer(gh)
 const getParsedYaml = createParsedYamlRetriever(gh)
@@ -22,9 +21,18 @@ const nullYaml = index => `kind: pipeline\nname: default_${index}\ntrigger:\n  e
 const app = express()
 app.post('/', bodyParser.json({limit: '50mb'}), async (req, res) => {
   console.log('Processing...')
-  if (!req.headers.signature) return res.status(400).send('Missing signature')
-  if (!isValidSig(req, sharedKey)) return res.status(400).send('Invalid signature')
-  if (!req.body) return res.sendStatus(400)
+  if (!req.headers.signature) {
+    console.log("Failed to process: missing signature")
+    return res.status(400).send('Missing signature')
+  }
+  if (!isValidSig(req, sharedKey)) {
+    console.log("Failed to process: invalid signature")
+    return res.status(400).send('Invalid signature')
+  }
+  if (!req.body) {
+    console.log("Failed to process: empty body")
+    return res.sendStatus(400)
+  }
   const data = req.body
 
   let filesChanged = []
@@ -58,27 +66,15 @@ app.post('/', bodyParser.json({limit: '50mb'}), async (req, res) => {
       }
     }
 
-    const transformedSteps = py.steps.map(s => {
-      if (!s.when || !s.when.changeset || !s.when.changeset.includes) {
-        return s;
-      }
-
+    const trimmedSteps = py.steps.filter(s => {
+      if (!s.when || !s.when.changeset || !s.when.changeset.includes) return true
       const requiredFiles = s.when.changeset.includes
       const matchedFiles = glob.match(requiredFiles, filesChanged, { dot: true })
       console.log('Matched files for step:', matchedFiles.length, 'Allowed matches:', requiredFiles)
-
-      if (!matchedFiles.length) {
-        // Add an impossible conditional which guarantees the step gets skipped
-        s.when = {
-          ...s.when,
-          event: { exclude: ['*'] },
-        }
-      }
-
-      return s;
+      return matchedFiles.length
     })
 
-    return transformedSteps.length ? yaml.stringify({ ...py, steps: transformedSteps }) : nullYaml(index)
+    return trimmedSteps.length ? yaml.stringify({ ...py, steps: trimmedSteps }) : nullYaml(index)
   })
 
   res.json({ Data: finalYamlDocs.join('\n---\n') })

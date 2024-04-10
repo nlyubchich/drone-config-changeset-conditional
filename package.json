@@ -9,12 +9,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@octokit/rest": "^18.12.0",
     "body-parser": "^1.18.3",
     "express": "^4.16.4",
+    "github4": "^1.1.1",
     "globule": "^1.2.1",
     "http-signature": "^1.2.0",
-    "octokit": "^1.0.5",
     "yaml": "^1.7.1"
   }
 }
